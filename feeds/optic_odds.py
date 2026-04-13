@@ -45,11 +45,10 @@ class OpticOddsFeed:
                 "OPTIC_ODDS_API_KEY not configured — cannot fetch upcoming races"
             )
 
-        url = f"{self._base_url}/fixtures"
+        url = f"{self._base_url}/fixtures/active"
         params = {
-            "sport_id": self._sport_id,
-            "league_id": self._league_id,
-            "status": "upcoming",
+            "sport": self._sport_id,
+            "league": self._league_id,
             "limit": limit,
         }
 

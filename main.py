@@ -25,6 +25,7 @@ from config import DEBUG, PORT, SERVICE_NAME, SERVICE_VERSION, R0_DIR
 from ml.predictor import IndycarPredictor
 from feeds.optic_odds import OpticOddsFeed
 from api.routes import health, races, markets, admin
+from api.routes.outrights import router as outrights_router
 
 logging.basicConfig(
     level=logging.DEBUG if DEBUG else logging.INFO,
@@ -113,6 +114,11 @@ def create_app() -> FastAPI:
         admin.router,
         prefix="/api/v1/indycar/admin",
         tags=["admin"],
+    )
+    app.include_router(
+        outrights_router,
+        prefix="/api/v1/indycar/outrights",
+        tags=["outrights"],
     )
 
     @app.get("/", include_in_schema=False)
