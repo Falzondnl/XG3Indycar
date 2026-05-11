@@ -38,6 +38,7 @@ class PredictRaceResponse(BaseModel):
     year: int
     field_size: int
     predictions: list[dict[str, Any]]
+    prediction_source: str = "ml_ensemble"
 
 
 @router.get("/upcoming")
