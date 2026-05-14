@@ -73,10 +73,58 @@ async def predict_race(
 ) -> PredictRaceResponse:
     """
     Predict win + podium probabilities for a supplied IndyCar race field.
-    Drivers with unknown driver_id default to ELO 1500 and zero career stats.
+
+    LOCK-INDYCAR-ELO-DEFAULT-NO-SILENT-FALLBACK-001:
+    Drivers with driver_id=0 or unknown driver_id are detected pre-prediction.
+    If ALL drivers in the field are unknown (driver_id=0), the request is refused
+    with 503 FIXTURE_UNPRICED — uniform odds from unseeded ELO are unshippable.
+    If SOME drivers are unknown, the response includes prediction_source="partial_elo"
+    and warns on the unknown drivers so the trader is informed.
     """
     import datetime
     year = body.year if body.year is not None else datetime.datetime.utcnow().year
+
+    # LOCK-INDYCAR-ELO-DEFAULT-NO-SILENT-FALLBACK-001:
+    # Detect unknown drivers (driver_id=0) — these will receive ELO 1500 silently.
+    # IndyCar is motorsports tier — refuse-to-price is acceptable when no ELO available.
+    extractor = getattr(getattr(predictor, "extractor", None), "elo_overall", None)
+    unknown_drivers = [
+        d.driver_name for d in body.drivers
+        if d.driver_id == 0 or (extractor is not None and d.driver_id not in extractor)
+    ]
+    all_unknown = len(unknown_drivers) == len(body.drivers)
+
+    if all_unknown:
+        logger.error(
+            "indycar_predict_all_drivers_unknown event=%s year=%d drivers=%s "
+            "LOCK-INDYCAR-ELO-DEFAULT-NO-SILENT-FALLBACK-001",
+            body.event_name, year, [d.driver_name for d in body.drivers],
+        )
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "FIXTURE_UNPRICED",
+                "reason": "all_drivers_unknown_no_elo",
+                "message": (
+                    f"All {len(body.drivers)} submitted drivers are unknown "
+                    f"(driver_id=0 or not in ELO store). Cannot price with "
+                    f"uniform ELO-1500 — that produces meaningless equal odds. "
+                    f"LOCK-INDYCAR-ELO-DEFAULT-NO-SILENT-FALLBACK-001"
+                ),
+                "event_name": body.event_name,
+                "year": year,
+            },
+        )
+
+    if unknown_drivers:
+        logger.warning(
+            "indycar_predict_partial_elo_unknown event=%s year=%d "
+            "unknown_drivers=%d total=%d names=%s "
+            "LOCK-INDYCAR-ELO-DEFAULT-NO-SILENT-FALLBACK-001",
+            body.event_name, year, len(unknown_drivers), len(body.drivers),
+            unknown_drivers[:10],
+        )
+
     drivers_input = [d.model_dump() for d in body.drivers]
 
     try:
@@ -94,9 +142,11 @@ async def predict_race(
             detail=f"Prediction failed: {exc}",
         )
 
+    prediction_source = "partial_elo" if unknown_drivers else "ml_ensemble"
     return PredictRaceResponse(
         event_name=body.event_name,
         year=year,
         field_size=len(predictions),
         predictions=predictions,
+        prediction_source=prediction_source,
     )
